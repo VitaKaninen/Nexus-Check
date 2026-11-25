@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus Check
 // @namespace   https://github.com/VitaKaninen
-// @version     0.2.0
+// @version     0.3.0
 // @author      VitaKaninen
 // @description Once a day, checks your Nexus Mods pages for new posts and bug reports and alerts you.
 // @match       *://*/*
@@ -307,7 +307,7 @@
     const K = {
         seen: 'nc_seen', deep: 'nc_deep', alerts: 'nc_alerts', lastOk: 'nc_lastOk', lastTry: 'nc_lastTry',
         failUntil: 'nc_failUntil', lock: 'nc_lock', run: 'nc_run', cf: 'nc_cf', mods: 'nc_mods',
-        own: 'nc_countOwn', gen: 'nc_gen', report: 'nc_report', log: 'nc_log'
+        gen: 'nc_gen', report: 'nc_report', log: 'nc_log'
     };
 
     // ---- storage
@@ -597,12 +597,11 @@
         }
         const seen = Object.assign({}, seenOf(t));
         const got = await walk(ctx, t, { doc, parsed }, parsePosts, 'CommentContainer', i => !seen[i.id]);
-        const own = get(K.own, true);
         const alerts = [];
         for (const i of got.items) {
             if (seen[i.id]) continue;
             seen[i.id] = 1;
-            if (!own && isMe(i.who)) continue;
+            if (isMe(i.who)) continue;
             alerts.push({ k: keyOf(t) + '/posts/' + i.id, mod: t.mod.name, tab: 'Posts', who: i.who, text: snip(i.text), url: urlOf(t) });
         }
         commit(ctx, t, seen, alerts);
@@ -647,7 +646,6 @@
         const seen = Object.assign({}, seenOf(t));
         const changed = (i) => !(i.id in seen) || i.replies > seen[i.id];
         const got = await walk(ctx, t, { doc, parsed }, parseBugs, 'ModBugsTab', changed);
-        const own = get(K.own, true);
         const alerts = [];
         for (const i of got.items) {
             if (!changed(i)) { seen[i.id] = i.replies; continue; }
@@ -655,7 +653,7 @@
             const d = await bugDetail(ctx, i.id);
             const names = (d && d.names) || [];
             seen[i.id] = i.replies;
-            if (!own && names.length && names.every(isMe)) continue;
+            if (names.length && names.every(isMe)) continue;
             alerts.push({
                 k: keyOf(t) + '/bugs/' + i.id + '/' + i.replies, mod: t.mod.name, tab: 'Bugs',
                 who: fresh ? names[0] || '' : names.length ? 'New reply (thread: ' + names.join(', ') + ')' : 'New reply',
@@ -888,13 +886,6 @@
         toast(SAID[await runCheck({ manual: true })]);
     }
 
-    function toggleOwn() {
-        const v = !get(K.own, true);
-        put(K.own, v);
-        buildMenu();
-        toast('My own comments: ' + (v ? 'counted' : 'ignored'));
-    }
-
     function resetState() {
         if (!confirm('Nexus Check: forget all seen comments and alerts? The next check will alert about everything again.')) return;
         put(K.gen, get(K.gen, 0) + 1);
@@ -903,19 +894,16 @@
         toast('Nexus Check state cleared');
     }
 
-    let menuIds = [], menuSig = '';
+    let menuIds = [], menuCount = -1;
 
     // Rebuilt only when a label changed.
     function buildMenu() {
         const n = get(K.alerts, []).length;
-        const own = get(K.own, true);
-        const sig = n + '/' + own;
-        if (sig === menuSig) return;
-        menuSig = sig;
+        if (n === menuCount) return;
+        menuCount = n;
         for (const id of menuIds) GM_unregisterMenuCommand(id);
         menuIds = [
             GM_registerMenuCommand('Check now', checkNow),
-            GM_registerMenuCommand((own ? '☑' : '☐') + ' Count my own comments', toggleOwn),
             GM_registerMenuCommand('Unread alerts: ' + n, () => { render(); toast(n ? n + ' shown at top right' : 'No unread alerts'); }),
             GM_registerMenuCommand('Show last report', showReport),
             GM_registerMenuCommand('Reset saved state', resetState)
@@ -933,7 +921,6 @@
         if (isChallengeHere()) { heartbeat(); buildMenu(); return; }
         render();
         GM_addValueChangeListener(K.alerts, (n, a, b, remote) => { if (remote) render(); });
-        GM_addValueChangeListener(K.own, (n, a, b, remote) => { if (remote) buildMenu(); });
 
         const run = get(K.run);
         const cf = get(K.cf);

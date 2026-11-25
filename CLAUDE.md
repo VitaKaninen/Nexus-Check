@@ -12,9 +12,9 @@ Tests: serve this folder (`.claude/launch.json` "tests"), open `/tests/run.html`
 - A pages walk cut short sets `nc_deep`, so the next check ignores the "nothing new, stop" rule.
 - A page without the expected elements is an error, never "no comments".
 - Selectors are ID-based by user approval (not learned); the comment count is the cross-check.
-- Own comments are marked seen while the toggle is off, so turning it on does not replay them.
-- A bug's author is known only from ModBugReplyList; unknown author = alert, never ignore. With the toggle
-  off, an own reply in someone else's bug still alerts (order of names in that response is unverified).
+- Own comments are always ignored (user removed the toggle, v0.3.0) and still marked seen.
+- A bug's author is known only from ModBugReplyList; unknown author = alert, never ignore. An own
+  reply in someone else's bug still alerts (order of names in that response is unverified).
 - `MAX_OPENS` stops a pass-but-still-blocked loop of challenge tabs.
 - Never fetch from a challenge page to get around it; the user completes the check, then the live DOM is read.
 

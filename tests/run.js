@@ -8,7 +8,8 @@ const row = (id, title, n) => `<tr class="mod-issue-row" data-issue-id="${id}"><
 const bugs = (rows, n) => `<title>Mod</title><body>${nav(2, n)}<div id="tab-modbugs"><select id="status"><option value="-1" selected>All</option></select>${rows ? `<table>${rows}</table>` : 'No issues reported at this time.'}</div>`;
 const CH = '<title>Just a moment...</title><body>Performing security verification';
 const P = 'https://www.nexusmods.com/vein/mods/207?tab=posts', B = P.replace('posts', 'bugs');
-const two = li(1, 'XestrangedX', 'Not working.<br>Help', li(2, 'VitaKaninen', 'Which version?'));
+const two = li(1, 'XestrangedX', 'Not working.<br>Help', li(2, 'Bea', 'Which version?'));
+const mine = li(1, 'XestrangedX', 'Not working.', li(2, 'VitaKaninen', 'Which version?'));
 const p2 = `<div id="comment-container">${pager('CommentContainer', 2, 2)}<ol>${li(3, 'Al', 'old')}</ol></div>`;
 const api = JSON.stringify({ data: { mods: { totalCount: 1, nodes: [{ modId: 207, name: 'SSM', status: 'published', game: { domainName: 'vein' } }] } } });
 
@@ -43,12 +44,12 @@ const day = (w) => { w.store.nc_lastOk = String(Date.now() - 25 * 36e5); w.store
 const alerts = (w) => val(w, 'nc_alerts') || [];
 
 const T = {
-    async 'first run alerts all, reply nested, own counted'(ok) {
+    async 'first run alerts all, reply nested'(ok) {
         const w = world({ [P]: posts(two, 2) });
         await load(w);
         ok(alerts(w).length === 2, alerts(w));
         ok(alerts(w)[0].text === 'Not working. Help' && alerts(w)[0].who === 'XestrangedX', alerts(w)[0]);
-        ok(alerts(w)[1].who === 'VitaKaninen' && alerts(w)[1].text === 'Which version?', alerts(w)[1]);
+        ok(alerts(w)[1].who === 'Bea' && alerts(w)[1].text === 'Which version?', alerts(w)[1]);
         ok(val(w, 'nc_lastOk') > 0 && !val(w, 'nc_lock') && !val(w, 'nc_run'), w.store);
         ok(w.notes.length === 2, w.notes);
         ok(!w.reqs.includes(B), w.reqs);
@@ -59,14 +60,14 @@ const T = {
         await load(w);
         ok(alerts(w).length === 2 && w.reqs.length > n, 'repeat run');
     },
-    async 'own ignored when off, and not replayed'(ok) {
-        const w = world({ [P]: posts(two, 2) });
-        w.store.nc_countOwn = 'false';
+    async 'own comments and own bugs are ignored'(ok) {
+        const w = world((u) => u === P ? posts(mine, 2, 1) : u === B ? bugs(row(9, 'Crash', 1), 1)
+            : '<span class="comment-name"><a>VitaKaninen</a></span>');
+        w.store.nc_countOwn = 'true';
         const m = await load(w);
-        ok(alerts(w).length === 1, alerts(w));
-        m['☐ Count my own comments']();
-        await m['Check now']();
-        ok(val(w, 'nc_countOwn') === true && alerts(w).length === 1, alerts(w));
+        ok(alerts(w).length === 1 && alerts(w)[0].who === 'XestrangedX', alerts(w));
+        ok(val(w, 'nc_lastOk') > 0 && w.notes.length === 1, w.store);
+        ok(!Object.keys(m).some(k => /own/.test(k)), Object.keys(m));
     },
     async 'two tabs at once run one check'(ok) {
         const w = world({ [P]: posts(two, 2) });
