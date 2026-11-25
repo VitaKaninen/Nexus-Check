@@ -2,7 +2,7 @@
 
 Userscript (LibreWolf + Violentmonkey): daily check of VitaKaninen's Nexus mods for new posts and bug
 reports. Runs in LibreWolf (user-confirmed menu works and alerts queue); still open (unknown there: whether
-GM_xmlhttpRequest passes Cloudflare, whether GM_notification shows; ask for `Show last report`).
+GM_xmlhttpRequest passes Cloudflare; ask for `Show last report`).
 
 Tests: serve this folder (`.claude/launch.json` "tests"), open `/tests/run.html`, expect `DONE 0 failed`.
 `us-log` is synced from HoverZoom: never edit it here.
@@ -15,6 +15,10 @@ Tests: serve this folder (`.claude/launch.json` "tests"), open `/tests/run.html`
 - Own comments are always ignored (user removed the toggle, v0.3.0) and still marked seen.
 - A bug's author is known only from ModBugReplyList; unknown author = alert, never ignore. An own
   reply in someone else's bug still alerts (order of names in that response is unverified).
+- Alerts (user's design, v0.4.0): new items open their mod tab in the background; the banner shows only on that
+  page until dismissed, and on every page once 24h old (`a.t`). Not seen = fallback, so a tab that never opened
+  still surfaces. GM_notification was removed: it never displays for the user. Problems go to `⚠ Show last report`
+  only, never the banner.
 - `MAX_OPENS` stops a pass-but-still-blocked loop of challenge tabs.
 - Never fetch from a challenge page to get around it; the user completes the check, then the live DOM is read.
 

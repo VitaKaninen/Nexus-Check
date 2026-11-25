@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus Check
 // @namespace   https://github.com/VitaKaninen
-// @version     0.3.0
+// @version     0.4.0
 // @author      VitaKaninen
 // @description Once a day, checks your Nexus Mods pages for new posts and bug reports and alerts you.
 // @match       *://*/*
@@ -12,7 +12,6 @@
 // @grant       GM_deleteValue
 // @grant       GM_addValueChangeListener
 // @grant       GM_xmlhttpRequest
-// @grant       GM_notification
 // @grant       GM_openInTab
 // @grant       GM_registerMenuCommand
 // @grant       GM_unregisterMenuCommand
@@ -301,6 +300,7 @@
     const BEAT_MS = 3 * MIN;      // a challenge tab silent this long counts as closed
     const MAX_PAGES = 30;
     const MAX_DETAILS = 10;
+    const MAX_TABS = 10;
     const MAX_OPENS = 2;          // challenge tabs per target per run
     const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '?';
 
@@ -536,7 +536,7 @@
     function addAlerts(list) {
         const cur = get(K.alerts, []);
         const have = new Set(cur.map(a => a.k));
-        put(K.alerts, cur.concat(list.filter(a => !have.has(a.k))));
+        put(K.alerts, cur.concat(list.filter(a => !have.has(a.k)).map(a => Object.assign({ t: Date.now() }, a))));
     }
 
     function setDeep(t, on) {
@@ -548,11 +548,8 @@
 
     function say(ctx, line) { ctx.lines.push(line); }
 
-    // A problem worth showing in the banner, once while undismissed.
-    function warn(ctx, t, what) {
-        say(ctx, label(t) + ': ' + what);
-        addAlerts([{ k: 'warn/' + keyOf(t) + '/' + t.tab, mod: t.mod.name, tab: tabName(t.tab), who: '', text: 'Nexus Check: ' + what, url: urlOf(t), warn: true }]);
-    }
+    // A problem: marks the report's menu item.
+    function warn(ctx, t, what) { say(ctx, '⚠ ' + label(t) + ': ' + what); }
 
     const label = (t) => t.mod.name + ' / ' + tabName(t.tab);
     const snip = (s) => { const x = squash(s); return x.length > 140 ? x.slice(0, 140) + '…' : x; };
@@ -690,11 +687,14 @@
     }
 
     // ---- the check
-    const matchesHere = (t) => {
-        const u = new URL(urlOf(t));
+    // True when this tab is the given mod tab, whatever else its address carries.
+    function isPage(url) {
+        const u = new URL(url);
         return location.hostname === u.hostname && location.pathname === u.pathname
-            && new URLSearchParams(location.search).get('tab') === t.tab;
-    };
+            && new URLSearchParams(location.search).get('tab') === u.searchParams.get('tab');
+    }
+
+    const matchesHere = (t) => isPage(urlOf(t));
 
     // Reads every remaining tab; opts.live lets the loaded page stand in for its own request.
     async function runCheck(opts) {
@@ -767,8 +767,8 @@
             if (status === 'failed') put(K.failUntil, Date.now() + HOUR);
         } finally {
             if (status !== 'aborted') {
-                const n = notify(ctx.fresh);
-                if (n) say(ctx, n);
+                const n = openPages(ctx.fresh);
+                if (n) say(ctx, 'Opened ' + n + ' background tab' + (n === 1 ? '' : 's'));
                 put(K.report, { t: Date.now(), status, lines: ctx.lines });
             }
             dropLock();
@@ -777,22 +777,12 @@
         return status;
     }
 
-    // ---- alerts: desktop
-    function notify(list) {
-        if (!list.length) return '';
-        const one = (title, text, url) => GM_notification({
-            title, text, onclick: () => GM_openInTab(url, { active: true })
-        });
-        try {
-            if (list.length <= 3) {
-                for (const a of list) one(a.mod + ' – ' + a.tab, (a.who ? a.who + ': ' : '') + a.text, a.url);
-            } else {
-                one('Nexus: ' + list.length + ' new', list.slice(0, 3).map(a => a.tab + ' – ' + (a.who ? a.who + ': ' : '') + a.text.slice(0, 50)).join('\n'), list[0].url);
-            }
-            return 'Desktop notification: requested without error (the script cannot tell if it was shown)';
-        } catch (e) {
-            return 'Desktop notification: failed (' + e.message + ')';
-        }
+    // ---- alerts: background tabs
+    // One background tab per page holding something new, unless this tab is already that page.
+    function openPages(list) {
+        const urls = Array.from(new Set(list.map(a => a.url))).filter(u => !isPage(u)).slice(0, MAX_TABS);
+        for (const u of urls) GM_openInTab(u, { active: false });
+        return urls.length;
     }
 
     // ---- alerts: banner
@@ -805,7 +795,7 @@
 
     const FONT = 'font:13px/1.4 system-ui,sans-serif;';
     const BTN = FONT + 'background:#45475a;color:#cdd6f4;border:0;border-radius:4px;padding:3px 9px;cursor:pointer;';
-    let bannerHost = null, panelHost = null;
+    let bannerHost = null, panelHost = null, showAll = false;
 
     function mount(css) {
         const host = el('div', 'all:initial;position:fixed;z-index:2147483647;' + css);
@@ -814,13 +804,20 @@
         return { host, root };
     }
 
-    const dismiss = (k) => { put(K.alerts, k ? get(K.alerts, []).filter(a => a.k !== k) : []); render(); };
+    // An alert shows on its own page; on every page once ignored for a day, or when asked for from the menu.
+    const shownHere = (a) => showAll || isPage(a.url) || Date.now() - (a.t || 0) > DAY;
+
+    function dismiss(list) {
+        const gone = new Set(list.map(a => a.k));
+        put(K.alerts, get(K.alerts, []).filter(a => !gone.has(a.k)));
+        render();
+    }
 
     // Redraws the banner from the stored queue.
     function render() {
         buildMenu();
         if (!isHtml) return;
-        const list = get(K.alerts, []);
+        const list = get(K.alerts, []).filter(shownHere);
         if (bannerHost) { bannerHost.remove(); bannerHost = null; }
         if (!list.length || isChallengeHere()) return;
         const { host, root } = mount('top:12px;right:12px;width:min(400px,calc(100vw - 24px));');
@@ -829,19 +826,20 @@
         const head = el('div', 'display:flex;align-items:center;gap:8px;padding:8px 10px;background:#313244;');
         head.appendChild(el('b', 'flex:1;color:#89b4fa;', 'Nexus: ' + list.length + (list.length === 1 ? ' alert' : ' alerts')));
         const all = el('button', BTN, 'Dismiss all');
-        all.addEventListener('click', () => dismiss());
+        all.addEventListener('click', () => dismiss(list));
         head.appendChild(all);
         box.appendChild(head);
         const body = el('div', 'overflow:auto;');
         for (const a of list) {
             const row = el('div', 'display:flex;gap:8px;padding:8px 10px;border-top:1px solid #313244;');
-            const main = el('div', 'flex:1;min-width:0;cursor:pointer;overflow-wrap:anywhere;');
-            main.appendChild(el('div', 'font-weight:600;color:' + (a.warn ? '#f9e2af' : '#a6e3a1') + ';', a.mod + ' – ' + a.tab));
+            const here = isPage(a.url);
+            const main = el('div', 'flex:1;min-width:0;overflow-wrap:anywhere;' + (here ? '' : 'cursor:pointer;'));
+            main.appendChild(el('div', 'font-weight:600;color:#a6e3a1;', a.mod + ' – ' + a.tab));
             if (a.who) main.appendChild(el('div', 'color:#89b4fa;', a.who));
             main.appendChild(el('div', '', a.text));
-            main.addEventListener('click', () => GM_openInTab(a.url, { active: true }));
+            if (!here) main.addEventListener('click', () => GM_openInTab(a.url, { active: true }));
             const x = el('button', BTN + 'align-self:flex-start;', '×');
-            x.addEventListener('click', () => dismiss(a.k));
+            x.addEventListener('click', () => dismiss([a]));
             row.append(main, x);
             body.appendChild(row);
         }
@@ -894,18 +892,21 @@
         toast('Nexus Check state cleared');
     }
 
-    let menuIds = [], menuCount = -1;
+    let menuIds = [], menuSig = '';
 
     // Rebuilt only when a label changed.
     function buildMenu() {
         const n = get(K.alerts, []).length;
-        if (n === menuCount) return;
-        menuCount = n;
+        const r = get(K.report);
+        const bad = !!r && (r.status === 'failed' || r.lines.some(l => l.startsWith('⚠')));
+        const sig = n + '/' + bad;
+        if (sig === menuSig) return;
+        menuSig = sig;
         for (const id of menuIds) GM_unregisterMenuCommand(id);
         menuIds = [
             GM_registerMenuCommand('Check now', checkNow),
-            GM_registerMenuCommand('Unread alerts: ' + n, () => { render(); toast(n ? n + ' shown at top right' : 'No unread alerts'); }),
-            GM_registerMenuCommand('Show last report', showReport),
+            GM_registerMenuCommand('Unread alerts: ' + n, () => { showAll = true; render(); toast(n ? n + ' shown at top right' : 'No unread alerts'); }),
+            GM_registerMenuCommand((bad ? '⚠ ' : '') + 'Show last report', showReport),
             GM_registerMenuCommand('Reset saved state', resetState)
         ];
     }
@@ -919,7 +920,10 @@
 
     async function start() {
         if (isChallengeHere()) { heartbeat(); buildMenu(); return; }
+        const old = get(K.alerts, []);
+        if (old.some(a => a.warn)) put(K.alerts, old.filter(a => !a.warn));
         render();
+        GM_addValueChangeListener(K.report, (n, a, b, remote) => { if (remote) buildMenu(); });
         GM_addValueChangeListener(K.alerts, (n, a, b, remote) => { if (remote) render(); });
 
         const run = get(K.run);

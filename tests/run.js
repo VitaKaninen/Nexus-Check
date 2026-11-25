@@ -18,14 +18,14 @@ let src;
 async function load(w, url = 'https://example.com/', html = '<body>', wait = 400) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const menu = {};
+    w.doc = doc;
     const g = {
         GM_getValue: (k) => w.store[k] === undefined ? undefined : JSON.parse(w.store[k]),
         GM_setValue: (k, v) => { w.store[k] = JSON.stringify(v); },
         GM_deleteValue: (k) => { delete w.store[k]; },
         GM_addValueChangeListener() {}, GM_unregisterMenuCommand() {},
         GM_registerMenuCommand: (c, f) => { menu[c] = f; return c; },
-        GM_notification: (o) => w.notes.push(o),
-        GM_openInTab: (u) => { const t = {}; w.tabs.push({ u, t }); return t; },
+        GM_openInTab: (u, o) => { const t = {}; (o.active ? w.tabs : w.bg).push({ u, t }); return t; },
         GM_xmlhttpRequest: (o) => {
             w.reqs.push(o.url);
             const r = o.url.includes('api.') ? api : typeof w.pages === 'function' ? w.pages(o.url, o) : w.pages[o.url];
@@ -38,10 +38,12 @@ async function load(w, url = 'https://example.com/', html = '<body>', wait = 400
     await new Promise(r => setTimeout(r, wait));
     return menu;
 }
-const world = (pages) => ({ store: {}, notes: [], tabs: [], reqs: [], pages });
+const world = (pages) => ({ store: {}, bg: [], tabs: [], reqs: [], pages });
 const val = (w, k) => w.store[k] && JSON.parse(w.store[k]);
 const day = (w) => { w.store.nc_lastOk = String(Date.now() - 25 * 36e5); w.store.nc_lastTry = '0'; };
 const alerts = (w) => val(w, 'nc_alerts') || [];
+const banner = (w) => Array.from(w.doc.documentElement.children).some(e => e.style && e.style.top === '12px');
+const problem = (w) => (val(w, 'nc_report') || { lines: [] }).lines.filter(l => l.startsWith('⚠')).join();
 
 const T = {
     async 'first run alerts all, reply nested'(ok) {
@@ -51,14 +53,15 @@ const T = {
         ok(alerts(w)[0].text === 'Not working. Help' && alerts(w)[0].who === 'XestrangedX', alerts(w)[0]);
         ok(alerts(w)[1].who === 'Bea' && alerts(w)[1].text === 'Which version?', alerts(w)[1]);
         ok(val(w, 'nc_lastOk') > 0 && !val(w, 'nc_lock') && !val(w, 'nc_run'), w.store);
-        ok(w.notes.length === 2, w.notes);
+        ok(w.bg.length === 1 && w.bg[0].u === P && !w.tabs.length, w.bg);
+        ok(!banner(w), 'banner on an unrelated page');
         ok(!w.reqs.includes(B), w.reqs);
         const n = w.reqs.length;
         await load(w);
         ok(w.reqs.length === n, 'second load within 24h fetched');
         day(w);
         await load(w);
-        ok(alerts(w).length === 2 && w.reqs.length > n, 'repeat run');
+        ok(alerts(w).length === 2 && w.reqs.length > n && w.bg.length === 1, 'repeat run');
     },
     async 'own comments and own bugs are ignored'(ok) {
         const w = world((u) => u === P ? posts(mine, 2, 1) : u === B ? bugs(row(9, 'Crash', 1), 1)
@@ -66,7 +69,7 @@ const T = {
         w.store.nc_countOwn = 'true';
         const m = await load(w);
         ok(alerts(w).length === 1 && alerts(w)[0].who === 'XestrangedX', alerts(w));
-        ok(val(w, 'nc_lastOk') > 0 && w.notes.length === 1, w.store);
+        ok(val(w, 'nc_lastOk') > 0 && w.bg.length === 1 && w.bg[0].u === P, w.bg);
         ok(!Object.keys(m).some(k => /own/.test(k)), Object.keys(m));
     },
     async 'two tabs at once run one check'(ok) {
@@ -86,7 +89,7 @@ const T = {
         await load(w, P + '&__cf_chl_rt_tk=x', CH);
         ok(w.tabs.length === 1 && val(w, 'nc_cf'), 'challenge page');
         await load(w, P, posts(two, 2, 1));
-        ok(alerts(w).length === 2, alerts(w));
+        ok(alerts(w).length === 2 && banner(w) && !w.bg.length, w.bg);
         ok(w.tabs.length === 2 && w.tabs[1].u === B, w.tabs);
         await load(w, B, bugs(row(9, 'Crash', 0), 1));
         ok(alerts(w).length === 3 && alerts(w)[2].text === 'Crash', alerts(w));
@@ -138,7 +141,7 @@ const T = {
         let good = false;
         const w = world((u) => u === P ? posts(two, 3, 0, 2) : good ? p2 : CH);
         await load(w);
-        ok(alerts(w).some(a => a.warn) && w.tabs.length === 0, alerts(w));
+        ok(/page 2/.test(problem(w)) && w.tabs.length === 0, val(w, 'nc_report'));
         good = true;
         day(w);
         await load(w);
@@ -147,13 +150,39 @@ const T = {
     async 'layout change fails loudly; disabled bugs fine; count mismatch warns'(ok) {
         const w = world({ [P]: '<title>Mod</title><body>' + nav(2, 0) });
         await load(w);
-        ok(alerts(w)[0] && alerts(w)[0].warn && !val(w, 'nc_lastOk'), alerts(w));
+        ok(problem(w) && !alerts(w).length && !val(w, 'nc_lastOk'), val(w, 'nc_report'));
+        ok(Object.keys(await load(w)).includes('⚠ Show last report'), 'menu mark');
         const x = world({ [P]: posts(two, 2, null) });
         await load(x);
         ok(val(x, 'nc_lastOk') > 0 && alerts(x).length === 2, x.store);
         const y = world({ [P]: posts(two, 5) });
         await load(y);
-        ok(alerts(y).some(a => /says 5/.test(a.text)), alerts(y));
+        ok(/says 5/.test(problem(y)), val(y, 'nc_report'));
+    },
+    async 'banner: own page only, everywhere after 24h, menu shows it, dismissal sticks'(ok) {
+        const w = world({ [P]: posts(two, 2) });
+        await load(w);
+        await load(w, 'https://example.com/b');
+        ok(!banner(w), 'other page, fresh');
+        await load(w, B, bugs('', 0));
+        ok(!banner(w), 'Bugs tab showed a Posts alert');
+        await load(w, P + '&jump=1', posts(two, 2));
+        ok(banner(w), 'own page');
+        const m = await load(w);
+        m['Unread alerts: 2']();
+        ok(banner(w), 'menu');
+        await load(w);
+        ok(!banner(w), 'menu choice leaked to the next page');
+        const set = (ms) => { w.store.nc_alerts = JSON.stringify(alerts(w).map(a => ({ ...a, t: Date.now() - ms }))); };
+        set(23 * 36e5);
+        await load(w);
+        ok(!banner(w), '23h');
+        set(25 * 36e5);
+        await load(w);
+        ok(banner(w), '25h');
+        w.store.nc_alerts = '[]';
+        await load(w);
+        ok(!banner(w), 'dismissed');
     },
     async 'comment quoting the challenge text is not a challenge'(ok) {
         const w = world({ [P]: posts(li(1, 'A', 'Performing security verification Just a moment'), 1) });
