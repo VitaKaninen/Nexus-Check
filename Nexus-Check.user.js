@@ -1,11 +1,10 @@
 // ==UserScript==
 // @name        Nexus Check
 // @namespace   https://github.com/VitaKaninen
-// @version     0.1.0
+// @version     0.2.0
 // @author      VitaKaninen
 // @description Once a day, checks your Nexus Mods pages for new posts and bug reports and alerts you.
 // @match       *://*/*
-// @noframes
 // @run-at      document-idle
 // @inject-into content
 // @grant       GM_setValue
@@ -26,6 +25,9 @@
 
 (function () {
     'use strict';
+
+    // Not @noframes: that makes Violentmonkey's menu throw on pages with iframes (CLAUDE.md).
+    if (window !== window.top) return;
 
     // ==== us-log begin ====
     // Shared verbatim by Forum Stumbler and Hover Zoom. Edit HoverZoom/shared/us-log.js, then run

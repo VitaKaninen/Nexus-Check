@@ -1,7 +1,7 @@
 # Nexus-Check
 
 Userscript (LibreWolf + Violentmonkey): daily check of VitaKaninen's Nexus mods for new posts and bug
-reports. v0.1.0 written 2026-11-25; tests pass, **never yet run in LibreWolf** (unknown there: whether
+reports. Runs in LibreWolf (user-confirmed menu works and alerts queue); still open (unknown there: whether
 GM_xmlhttpRequest passes Cloudflare, whether GM_notification shows; ask for `Show last report`).
 
 Tests: serve this folder (`.claude/launch.json` "tests"), open `/tests/run.html`, expect `DONE 0 failed`.
@@ -56,6 +56,6 @@ opening page goes away. `@connect` is not in its docs.
 **Menu shows red "undefined is not a function", command still works** (user report, not reproduced):
 likely VM 2.50.1, not this script. The popup sends `Command` to every frame; a `@noframes` script is absent from a
 subframe's `bridge.ids`, so its realm is undefined and `setupContentInvoker`'s `postViaBridge` (undefined when the
-frame has only content-mode scripts) is called. The rejection also skips the popup's auto-close. Untested fix:
-drop `@noframes`, keep `@inject-into content`, and return at the top if `window !== window.top`.
-Test: no error expected on a page without iframes.
+frame has only content-mode scripts) is called. The rejection also skips the popup auto-close. No error on
+example.com (user). Fix in v0.2.0, not yet confirmed by the user (do not restore `@noframes`):
+no `@noframes`, keep `@inject-into content`, and return at the top if `window !== window.top`.
