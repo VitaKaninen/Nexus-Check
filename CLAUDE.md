@@ -52,3 +52,10 @@ Sample with bugs (not adult): skyrimspecialedition/mods/51614. Avoid adult mods 
 
 **Violentmonkey:** no documented toolbar badge API. `GM_openInTab` handle has `onclose`/`closed`, `onclose` is lost if the
 opening page goes away. `@connect` is not in its docs.
+
+**Menu shows red "undefined is not a function", command still works** (user report, not reproduced):
+likely VM 2.50.1, not this script. The popup sends `Command` to every frame; a `@noframes` script is absent from a
+subframe's `bridge.ids`, so its realm is undefined and `setupContentInvoker`'s `postViaBridge` (undefined when the
+frame has only content-mode scripts) is called. The rejection also skips the popup's auto-close. Untested fix:
+drop `@noframes`, keep `@inject-into content`, and return at the top if `window !== window.top`.
+Test: no error expected on a page without iframes.
